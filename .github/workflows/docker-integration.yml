@@ -1,0 +1,78 @@
+name: Docker integration
+
+# Starts Neo4j with the project's docker-compose.yml, builds and loads the
+# SNAP ego-Twitter graph, then runs the integration tests against it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Neo4j integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Start Neo4j (make up)
+        run: make up
+
+      - name: Wait for Neo4j to accept connections
+        run: |
+          for attempt in $(seq 1 60); do
+            if python scripts/smoke_check.py; then
+              exit 0
+            fi
+            echo "Neo4j not ready yet (attempt $attempt/60)"
+            sleep 3
+          done
+          echo "Neo4j did not become ready in time" >&2
+          exit 1
+
+      - name: Restore SNAP archive cache
+        uses: actions/cache@v6
+        with:
+          path: data/raw/twitter.tar.gz
+          key: snap-twitter-5ed7b52a8013a1a1d43301a5414dfcb844e50cb4e2fb8dc801a7bef399552bb0
+
+      - name: Download and preprocess dataset (make data)
+        run: make data PYTHON=python
+
+      - name: Load graph into Neo4j (make load)
+        run: make load PYTHON=python
+
+      - name: Run integration tests
+        run: make test-integration PYTHON=python
+
+      - name: Run vertical slice check
+        run: make slice-check PYTHON=python
+
+      - name: Show Neo4j logs on failure
+        if: failure()
+        run: docker compose logs neo4j
+
+      - name: Stop Neo4j
+        if: always()
+        run: docker compose down -v
