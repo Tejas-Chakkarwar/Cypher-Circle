@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires the project's local Neo4j instance",
+]
+addopts = "-ra"
+
+testpaths = ["tests"]
+
