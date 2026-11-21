@@ -1,5 +1,8 @@
 # Cypher Circle
 
+[![CI](https://github.com/Tejas-Chakkarwar/Cypher-Circle/actions/workflows/ci.yml/badge.svg)](https://github.com/Tejas-Chakkarwar/Cypher-Circle/actions/workflows/ci.yml)
+[![Docker integration](https://github.com/Tejas-Chakkarwar/Cypher-Circle/actions/workflows/docker-integration.yml/badge.svg)](https://github.com/Tejas-Chakkarwar/Cypher-Circle/actions/workflows/docker-integration.yml)
+
 See [docs/PROJECT_DESIGN.pdf](docs/PROJECT_DESIGN.pdf) for the project design document covering
 the architecture, data pipeline, graph model, use cases, security behavior,
 testing, and setup.
