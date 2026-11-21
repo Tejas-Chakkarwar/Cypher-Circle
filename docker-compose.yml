@@ -1,0 +1,16 @@
+services:
+  neo4j:
+    image: neo4j:5.26.0-community
+    container_name: cyphercircle-neo4j
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      # The port bindings are localhost-only; this demo fallback is never exposed remotely.
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-cyphercircle-dev}
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:
+
