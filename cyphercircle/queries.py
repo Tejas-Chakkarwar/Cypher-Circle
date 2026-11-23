@@ -232,10 +232,17 @@ UPDATE_PROFILE = """
 MATCH (u:User {username: $username})
 SET u.name = coalesce($name, u.name),
     u.name_lc = toLower(coalesce($name, u.name)),
+    u.email = coalesce($email, u.email),
     u.bio = coalesce($bio, u.bio),
     u.location = coalesce($location, u.location),
     u.updated_at = datetime()
 RETURN u.username AS username
+""".strip()
+
+CHECK_EMAIL_IN_USE = """
+MATCH (other:User {email: $email})
+WHERE other.username <> $username
+RETURN count(other) > 0 AS taken
 """.strip()
 
 CLEAR_BIO = """
@@ -348,23 +355,6 @@ RETURN EXISTS { (me)-[:FOLLOWS]->(other) } AS i_follow,
        EXISTS { (other)-[:FOLLOWS]->(me) } AS they_follow
 """.strip()
 
-RECOMMEND_BY_CIRCLE = """
-MATCH (me:User {username: $username})-[:IN_CIRCLE]->(c:Circle)<-[:IN_CIRCLE]-(rec:User)
-WHERE rec <> me AND NOT (me)-[:FOLLOWS]->(rec) AND NOT rec.username IN $exclude
-WITH rec, min(c.name) AS circle
-WITH rec, circle, count { (:User)-[:FOLLOWS]->(rec) } AS followers
-RETURN rec.username AS username, rec.name AS name, rec.location AS location,
-       followers, circle
-ORDER BY followers DESC, username ASC
-LIMIT $limit
-""".strip()
-
-GET_FOLLOWING_USERNAMES = """
-MATCH (:User {username: $username})-[:FOLLOWS]->(u:User)
-WITH u ORDER BY u.username ASC
-RETURN collect(u.username) AS usernames
-""".strip()
-
 GET_POPULAR_USERS = """
 MATCH (u:User)
 WHERE NOT u.username IN $exclude
@@ -385,6 +375,30 @@ RETURN u.username AS username, u.name AS name, u.location AS location, followers
        EXISTS { (:User {username: $me})-[:FOLLOWS]->(u) } AS i_follow
 ORDER BY rank, followers DESC, username ASC
 LIMIT $limit
+""".strip()
+
+COUNT_USERS = """
+MATCH (u:User)
+RETURN count(u) AS total
+""".strip()
+
+GET_ALL_USERS = """
+MATCH (u:User)
+RETURN u.username AS username, u.name AS name, u.location AS location,
+       count { (:User)-[:FOLLOWS]->(u) } AS followers,
+       u.username = $me AS is_me,
+       EXISTS { (:User {username: $me})-[:FOLLOWS]->(u) } AS i_follow
+ORDER BY username ASC
+SKIP $skip LIMIT $limit
+""".strip()
+
+# Variable-length bounds cannot be parameters in Cypher, so the 4-hop limit
+# required by UC-13 is part of the pattern.
+FIND_SHORTEST_FOLLOW_PATH = """
+MATCH (source:User {username: $source}), (target:User {username: $target})
+MATCH path = shortestPath((source)-[:FOLLOWS*1..4]->(target))
+RETURN [node IN nodes(path) | {username: node.username, name: node.name}] AS users,
+       length(path) AS hops
 """.strip()
 
 DELETE_USER_BY_USERNAME = """
