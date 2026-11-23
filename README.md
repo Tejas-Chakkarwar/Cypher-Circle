@@ -10,9 +10,29 @@ testing, and setup.
 Cypher Circle is a complete Python 3.13 application backed by Neo4j, with a
 first-class Rich console, a polished Flask browser interface, a deterministic
 SNAP ego-Twitter data pipeline, offline network visualization, and reproducible
-report/package tooling. The loaded graph is exercised
-through registration, login, profile editing, circles, connections, search,
-recommendations, and directed network visualization.
+report/package tooling. Both interfaces implement all 13 required use cases
+below, plus an optional offline network visualization.
+
+## Use cases
+
+| UC | Use case | Console menu | Web page |
+|---|---|---|---|
+| UC-1 | User registration | Start menu `2` | `/register` |
+| UC-2 | User login | Start menu `1` | `/login` |
+| UC-3 | View profile | `1` | `/profile` |
+| UC-4 | Edit profile (name, email, bio; username fixed) | `2` → `1` | `/profile/edit` |
+| UC-5 | Follow another user | `3`, or pick from `7`, `8`, `9`, `10` | Follow buttons |
+| UC-6 | Unfollow a user | `4`, or pick from `8`, `9` | Following buttons |
+| UC-7 | View following and followers | `5` | `/connections` |
+| UC-8 | Mutual connections of two users | `6` | `/mutual` |
+| UC-9 | Friend recommendations (exactly two hops) | `7` | `/recommendations` |
+| UC-10 | View all users | `8` | `/users` |
+| UC-11 | Search users by name or username | `9` | `/search` |
+| UC-12 | Explore popular users | `10` | `/popular` |
+| UC-13 | Degrees of separation (shortest directed path, ≤4 hops) | `11` | `/separation` |
+
+Every Cypher query is a named constant in `cyphercircle/queries.py`. In the
+console, press `C` to toggle Show Cypher and see the queries each action ran.
 
 ## Local setup
 
@@ -79,17 +99,17 @@ environment plus ReportLab, Pillow, and Poppler (`pdfinfo`, `pdftotext`, and
 fact instead of inventing evidence. Screenshots belong in
 `docs/report/screenshots/` and remain a team-supplied submission asset.
 
-`make zip` verifies the PDF and creates the reproducible `projects.zip` archive.
-The archive includes the report and a `source/` tree, but excludes raw and
+`make zip` verifies the PDF and creates the reproducible `project.zip` archive
+required for submission: `report.pdf` at the top level and a `source_code/`
+directory with everything needed to run the application. It excludes raw and
 processed data, `.env`, `.venv`, `output/`, caches, logs, and credentials.
 
 The accepted SNAP archive SHA-256 is
 `5ed7b52a8013a1a1d43301a5414dfcb844e50cb4e2fb8dc801a7bef399552bb0`.
 
 The console application is started with `python -m cyphercircle` or `make run`.
-It provides registration, login, profiles, circles, connections,
-recommendations, search, popular users, pagination, an optional Show Cypher
-view, and the `V` network visualization action. Visualization writes
+It provides all 13 use cases listed above, pagination, an optional Show Cypher
+view, and the optional `V` network visualization action. Visualization writes
 `output/network_<username>.html`, opens it in the browser, and embeds all
 resources so the generated directed graph works offline. The page includes a
 legend for center, following-only, follower-only, and mutual nodes, plus
@@ -118,10 +138,8 @@ from `WEB_HOST` and `WEB_PORT`; `WEB_SECRET_KEY` controls signed web sessions
 and should be a private random value for a persistent local setup. `WEB_DEBUG`
 defaults to `false` and is not enabled by `make web`.
 
-The web UI supports registration and login, profile editing, public profiles,
-following and unfollowing, connections and mutual connections, search,
-recommendations, popular users, circle membership, and the existing offline
-network visualization. Mutations use POST plus CSRF tokens, and the browser
+The web UI supports all 13 use cases listed above, plus public profiles,
+circle membership, and the offline network visualization. Mutations use POST plus CSRF tokens, and the browser
 session stores only the signed username and display name. Passwords and
 password hashes are never stored in the web session or rendered in templates.
 
