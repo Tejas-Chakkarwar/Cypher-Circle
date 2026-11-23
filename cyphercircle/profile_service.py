@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from .db import Database
-from .errors import MembershipError, NotFoundError
+from .errors import ConflictError, DataIntegrityError, MembershipError, NotFoundError
 from .models import CircleSummary, Profile, Session
 from .queries import (
+    CHECK_EMAIL_IN_USE,
     CIRCLE_EXISTS,
     CLEAR_BIO,
     CLEAR_LOCATION,
@@ -18,6 +19,7 @@ from .queries import (
 from .service_utils import counter, native_datetime, principal_username
 from .validation import (
     normalize_circle_id,
+    normalize_email,
     normalize_username,
     validate_bio,
     validate_location,
@@ -62,12 +64,20 @@ class ProfileService:
         session: Session,
         *,
         name: str | None = None,
+        email: str | None = None,
         bio: str | None = None,
         location: str | None = None,
     ) -> Profile:
+        """Update name, email, bio, or location (UC-4); the username never changes.
+
+        ``None`` keeps a field; ``"-"`` clears bio or location.
+        """
+
         username = principal_username(session)
         if name is not None:
             name = validate_name(name)
+        if email is not None:
+            email = normalize_email(email)
         clear_bio = bio == "-"
         clear_location = location == "-"
         if not clear_bio:
@@ -75,15 +85,30 @@ class ProfileService:
         if not clear_location:
             location = validate_location(location)
         self._require_user(username)
-        if name is not None or (bio is not None and not clear_bio) or (location is not None and not clear_location):
-            self.db.write(
-                "UPDATE_PROFILE",
-                UPDATE_PROFILE,
-                username=username,
-                name=name,
-                bio=None if clear_bio else bio,
-                location=None if clear_location else location,
+        if email is not None:
+            rows, _ = self.db.read(
+                "CHECK_EMAIL_IN_USE", CHECK_EMAIL_IN_USE, email=email, username=username
             )
+            if rows and rows[0].get("taken"):
+                raise ConflictError("email is already taken")
+        if (
+            name is not None
+            or email is not None
+            or (bio is not None and not clear_bio)
+            or (location is not None and not clear_location)
+        ):
+            try:
+                self.db.write(
+                    "UPDATE_PROFILE",
+                    UPDATE_PROFILE,
+                    username=username,
+                    name=name,
+                    email=email,
+                    bio=None if clear_bio else bio,
+                    location=None if clear_location else location,
+                )
+            except DataIntegrityError as exc:
+                raise ConflictError("email is already taken") from exc
         if clear_bio:
             self.db.write("CLEAR_BIO", CLEAR_BIO, username=username)
         if clear_location:
