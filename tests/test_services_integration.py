@@ -20,6 +20,7 @@ from cyphercircle.errors import (
     NotFollowingError,
     NotFoundError,
     SelfActionError,
+    ValidationError,
 )
 from cyphercircle.graph_service import GraphService
 from cyphercircle.models import Session
@@ -158,6 +159,12 @@ def test_service_layer_end_to_end(services: ServiceContext) -> None:
     cleared = profile.update_profile(alpha_session, bio="-", location="-")
     assert cleared.bio is None
     assert cleared.location is None
+    new_email = f"{alpha}.new@example.com"
+    emailed = profile.update_profile(alpha_session, email=f"  {new_email.upper()} ")
+    assert emailed.email == new_email
+    assert emailed.username == alpha
+    with pytest.raises(ConflictError, match="email is already taken"):
+        profile.update_profile(alpha_session, email=f"{beta}@example.com")
 
     circle_profile = profile.get_profile(circle_session)
     assert circle_profile.circle_count == 1
@@ -210,28 +217,57 @@ def test_service_layer_end_to_end(services: ServiceContext) -> None:
     assert alpha not in recommended_names
     assert services.busy_user not in recommended_names
 
+    # UC-9 uses exactly two-hop follow paths: no circle or popularity fallback.
     query_log = QueryLog()
     services.db.query_log = query_log
-    query_log.begin_action("UC-9-CIRCLE-FALLBACK")
-    assert profile.join_circle(circle_session, services.circle_id) is True
-    assert profile.join_circle(beta_session, services.circle_id) is True
-    circle_recommendations = graph.recommendations(circle_session, limit=10)
-    circle_query_names = [entry.name for entry in query_log.entries()]
-    assert "RECOMMEND_BY_CIRCLE" in circle_query_names
-    assert "GET_POPULAR_USERS" in circle_query_names
-    assert any(item.reason == "circle" for item in circle_recommendations)
-    assert any(item.reason == "popular" for item in circle_recommendations)
-    profile.leave_circle(circle_session, services.circle_id)
-    profile.leave_circle(beta_session, services.circle_id)
-
-    query_log.begin_action("UC-9-POPULAR-FALLBACK")
     assert graph.connection_counts(no_circle_session).following == 0
-    assert profile.get_profile(no_circle_session).circles == []
-    no_circle_recommendations = graph.recommendations(no_circle_session, limit=10)
-    no_circle_query_names = [entry.name for entry in query_log.entries()]
-    assert no_circle_recommendations
-    assert "RECOMMEND_BY_CIRCLE" not in no_circle_query_names
-    assert "GET_POPULAR_USERS" in no_circle_query_names
+    query_log.begin_action("UC-9")
+    assert graph.recommendations(no_circle_session, limit=10) == []
+    assert [entry.name for entry in query_log.entries()] == ["USER_EXISTS", "RECOMMEND_BY_NETWORK"]
+
+    # alpha -> beta -> circle_user and alpha -> gamma -> circle_user: listed once.
+    graph.follow(alpha_session, gamma)
+    graph.follow(beta_session, circle_user)
+    graph.follow(gamma_session, circle_user)
+    alpha_recommendations = graph.recommendations(alpha_session, limit=100)
+    alpha_names = [item.user.username for item in alpha_recommendations]
+    assert alpha_names.count(circle_user) == 1
+    assert next(item for item in alpha_recommendations if item.user.username == circle_user).score == 2
+    assert not {alpha, beta, gamma, services.busy_user} & set(alpha_names)
+
+    # no_circle -> alpha -> gamma -> circle_user is three hops, so it is excluded.
+    graph.follow(no_circle_session, alpha)
+    no_circle_names = {item.user.username for item in graph.recommendations(no_circle_session, limit=100)}
+    assert {beta, gamma} <= no_circle_names
+    assert circle_user not in no_circle_names
+
+    # UC-8 compares any two users, not only the logged-in one.
+    pair = graph.mutual_connections(no_circle_session, gamma, first=beta)
+    assert (pair.first, pair.second) == (beta, gamma)
+    assert [row.username for row in pair.users] == [circle_user]
+    with pytest.raises(SelfActionError):
+        graph.mutual_connections(alpha_session, beta, first=beta)
+
+    # UC-13: shortest directed path, at most four hops, direction matters.
+    separation = graph.degrees_of_separation(alpha_session, no_circle_user, circle_user)
+    assert separation.found and separation.degrees == 3
+    assert separation.path[0].username == no_circle_user
+    assert separation.path[-1].username == circle_user
+    reverse = graph.degrees_of_separation(alpha_session, circle_user, no_circle_user)
+    assert not reverse.found and reverse.degrees is None
+    assert graph.degrees_of_separation(alpha_session, alpha, gamma).degrees == 1
+    with pytest.raises(ValidationError):
+        graph.degrees_of_separation(alpha_session, alpha, alpha)
+    with pytest.raises(NotFoundError):
+        graph.degrees_of_separation(alpha_session, alpha, "zztest_missing_")
+
+    # UC-10 lists every user, including the viewer and people they follow.
+    total = search.all_users(alpha_session, limit=1).total
+    assert total >= 1000
+    tail = search.all_users(alpha_session, skip=max(0, total - 100), limit=100)
+    entries = {entry.username: entry for entry in tail.users}
+    assert entries[alpha].is_me and not entries[alpha].i_follow
+    assert entries[beta].i_follow and not entries[beta].is_me
 
     search_results = search.search_users(alpha_session, f"  {beta[:4].upper()}  ")
     assert any(row.username == beta for row in search_results)

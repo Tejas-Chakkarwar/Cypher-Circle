@@ -12,6 +12,7 @@ from cyphercircle.errors import (
     ConflictError,
     MembershipError,
     NotFollowingError,
+    NotFoundError,
     QueryError,
     SelfActionError,
     ValidationError,
@@ -197,23 +198,121 @@ def test_graph_service_distinguishes_self_duplicate_and_missing_follow() -> None
         graph.unfollow(Session("alice.a", "Alice"), "bob.b")
 
 
-def test_recommendations_run_tiers_with_remaining_limit_and_exclusions() -> None:
+def test_recommendations_use_only_the_two_hop_query() -> None:
     db = FakeDB()
     db.reads["USER_EXISTS"] = [{"exists": True}]
-    db.reads["GET_FOLLOWING_USERNAMES"] = [{"usernames": ["already.followed"]}]
     db.reads["RECOMMEND_BY_NETWORK"] = [{
         "username": "network.user", "name": "Network", "location": None,
         "followers": 4, "score": 2, "via": ["mid.one", "mid.two"],
     }]
-    db.reads["GET_MY_CIRCLES"] = []
-    db.reads["GET_POPULAR_USERS"] = [{
-        "username": "popular.user", "name": "Popular", "location": "Town", "followers": 8,
-    }]
     results = GraphService(db).recommendations(Session("alice.a", "Alice"), limit=2)
-    assert [result.user.username for result in results] == ["network.user", "popular.user"]
-    assert [result.reason for result in results] == ["network", "popular"]
-    popular_call = next(params for name, params in db.calls if name == "GET_POPULAR_USERS")
-    assert popular_call["exclude"] == ["alice.a", "already.followed", "network.user"]
+    assert [result.user.username for result in results] == ["network.user"]
+    assert results[0].score == 2
+    assert results[0].via == ["mid.one", "mid.two"]
+    assert [name for name, _params in db.calls] == ["USER_EXISTS", "RECOMMEND_BY_NETWORK"]
+
+
+def test_recommendations_are_empty_without_two_hop_paths() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    assert GraphService(db).recommendations(Session("alice.a", "Alice")) == []
+    assert "GET_POPULAR_USERS" not in [name for name, _params in db.calls]
+
+
+def test_mutual_connections_can_compare_any_two_users() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    db.reads["COUNT_MUTUAL_FOLLOWING"] = [{"total": 1}]
+    db.reads["GET_MUTUAL_FOLLOWING"] = [{"username": "carol.c", "name": "Carol", "location": None}]
+    db.reads["GET_RELATIONSHIP_STATUS"] = [{"i_follow": True, "they_follow": False}]
+    result = GraphService(db).mutual_connections(
+        Session("alice.a", "Alice"), "Dave.D", first=" Bob.B "
+    )
+    assert (result.first, result.second, result.total) == ("bob.b", "dave.d", 1)
+    count_params = next(params for name, params in db.calls if name == "COUNT_MUTUAL_FOLLOWING")
+    assert count_params == {"me": "bob.b", "other": "dave.d"}
+    with pytest.raises(SelfActionError):
+        GraphService(db).mutual_connections(Session("alice.a", "Alice"), "bob.b", first="bob.b")
+
+
+def test_degrees_of_separation_returns_path_and_degree_count() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    db.reads["FIND_SHORTEST_FOLLOW_PATH"] = [{
+        "users": [
+            {"username": "a.user", "name": "A"},
+            {"username": "b.user", "name": "B"},
+            {"username": "c.user", "name": "C"},
+            {"username": "d.user", "name": "D"},
+        ],
+        "hops": 3,
+    }]
+    result = GraphService(db).degrees_of_separation(Session("me.user", "Me"), "A.User", "d.user")
+    assert result.found
+    assert result.degrees == 3
+    assert result.max_hops == 4
+    assert [step.username for step in result.path] == ["a.user", "b.user", "c.user", "d.user"]
+
+
+def test_degrees_of_separation_reports_no_path_and_rejects_bad_input() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    graph = GraphService(db)
+    session = Session("me.user", "Me")
+    result = graph.degrees_of_separation(session, "a.user", "d.user")
+    assert not result.found
+    assert result.degrees is None
+    with pytest.raises(ValidationError):
+        graph.degrees_of_separation(session, "a.user", "A.USER")
+    db.reads["USER_EXISTS"] = [{"exists": False}]
+    with pytest.raises(NotFoundError):
+        graph.degrees_of_separation(session, "a.user", "missing.user")
+
+
+def test_profile_update_changes_email_but_never_username() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    db.reads["CHECK_EMAIL_IN_USE"] = [{"taken": False}]
+    db.reads["GET_PROFILE"] = [{
+        "username": "alice.a", "name": "Alice", "email": "new@example.com",
+        "bio": None, "location": None, "circles": [], "circle_count": 0,
+        "joined_at": datetime(2024, 1, 1, tzinfo=UTC),
+        "following_count": 0, "followers_count": 0,
+    }]
+    ProfileService(db).update_profile(Session("alice.a", "Alice"), email="  NEW@Example.com ")
+    update = next(params for name, params in db.calls if name == "UPDATE_PROFILE")
+    assert update["email"] == "new@example.com"
+    assert update["username"] == "alice.a"
+    assert "new_username" not in update
+
+
+def test_profile_update_rejects_email_used_by_someone_else() -> None:
+    db = FakeDB()
+    db.reads["USER_EXISTS"] = [{"exists": True}]
+    db.reads["CHECK_EMAIL_IN_USE"] = [{"taken": True}]
+    with pytest.raises(ConflictError, match="email is already taken"):
+        ProfileService(db).update_profile(Session("alice.a", "Alice"), email="bob@example.com")
+    assert "UPDATE_PROFILE" not in [name for name, _params in db.calls]
+    with pytest.raises(ValidationError):
+        ProfileService(db).update_profile(Session("alice.a", "Alice"), email="not-an-email")
+
+
+def test_all_users_lists_everyone_with_follow_state() -> None:
+    db = FakeDB()
+    db.reads["COUNT_USERS"] = [{"total": 2}]
+    db.reads["GET_ALL_USERS"] = [
+        {"username": "alice.a", "name": "Alice", "location": None, "followers": 1,
+         "is_me": True, "i_follow": False},
+        {"username": "bob.b", "name": "Bob", "location": "Town", "followers": 3,
+         "is_me": False, "i_follow": True},
+    ]
+    directory = SearchService(db).all_users(Session("alice.a", "Alice"), skip=0, limit=20)
+    assert directory.total == 2
+    assert [(row.username, row.is_me, row.i_follow) for row in directory.users] == [
+        ("alice.a", True, False),
+        ("bob.b", False, True),
+    ]
+    assert db.calls[-1] == ("GET_ALL_USERS", {"me": "alice.a", "skip": 0, "limit": 20})
 
 
 def test_search_service_normalizes_query_and_maps_follow_state() -> None:

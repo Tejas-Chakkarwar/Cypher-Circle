@@ -13,15 +13,23 @@ from cyphercircle.db import LoggedQuery, QueryLog
 from cyphercircle.errors import (
     AuthenticationError,
     DatabaseUnavailableError,
+    SelfActionError,
     VisualizationError,
 )
 from cyphercircle.models import (
     Connection,
     ConnectionCounts,
+    DirectoryEntry,
     GraphStats,
+    MutualConnection,
+    MutualConnections,
+    PathStep,
     Profile,
     Recommendation,
+    RelationshipStatus,
+    SeparationResult,
     Session,
+    UserDirectory,
     UserSummary,
 )
 
@@ -92,6 +100,7 @@ class FakeGraph:
         self.follow_calls: list[str] = []
         self.unfollow_calls: list[str] = []
         self.connection_skips: list[int] = []
+        self.mutual_calls: list[tuple[str | None, str]] = []
 
     def follow(self, _session: Session, target: str) -> bool:
         self.follow_calls.append(target)
@@ -113,21 +122,43 @@ class FakeGraph:
         self.connection_skips.append(skip)
         return [_connection(f"follower_{index}") for index in range(skip, skip + limit)]
 
-    def mutual_connections(self, *_args, **_kwargs):
-        raise AssertionError("not used by this test double")
+    def mutual_connections(self, session: Session, other: str, *, first=None, **_kwargs):
+        self.mutual_calls.append((first, other))
+        return MutualConnections(
+            1,
+            [MutualConnection("carol.c", "Carol", None)],
+            RelationshipStatus(False, True),
+            first or session.username,
+            other,
+        )
+
+    def degrees_of_separation(self, _session: Session, source: str, target: str):
+        if target == "nobody.n":
+            return SeparationResult(source, target, 4, [])
+        return SeparationResult(
+            source, target, 4, [PathStep(source, "A"), PathStep("mid.one", "M"), PathStep(target, "B")]
+        )
 
     def recommendations(self, _session: Session, *, limit: int):
         self.query_log.record(
             LoggedQuery("RECOMMEND_BY_NETWORK", "RETURN $password_hash", {"password_hash": "***"}, 1)
         )
         return [
-            Recommendation(
-                UserSummary("bob.b", "Bob", None, 4), 2, ["mid.one"], "network", None
-            )
+            Recommendation(UserSummary("bob.b", "Bob", None, 4), 2, ["mid.one"])
         ][:limit]
 
 
 class FakeSearch:
+    def all_users(self, _session: Session, *, skip: int = 0, limit: int = 20):
+        return UserDirectory(
+            3,
+            [
+                DirectoryEntry("alice.a", "Alice", None, 2, True, False),
+                DirectoryEntry("bob.b", "Bob", None, 4, False, True),
+                DirectoryEntry("carol.c", "Carol", None, 1, False, False),
+            ],
+        )
+
     def search_users(self, *_args, **_kwargs):
         return []
 
@@ -277,7 +308,7 @@ def test_recommendation_selection_starts_follow_action_log() -> None:
     [
         ("_follow", "bob.b", "UC-5 · Follow a user"),
         ("_unfollow", "bob.b", "UC-6 · Unfollow a user"),
-        ("_connections", "b", "UC-7 · Connections"),
+        ("_connections", "b", "UC-7 · Following and Followers"),
     ],
 )
 def test_social_graph_actions_have_uc_titles(
@@ -291,7 +322,7 @@ def test_social_graph_actions_have_uc_titles(
 
 def test_edit_profile_shows_one_query_panel_per_subaction() -> None:
     cli, _graph, output = _cli(
-        input_values=["1", "alice.a", "c", "2", "1", "New Name", "", "", "0", "0", "0"],
+        input_values=["1", "alice.a", "c", "2", "1", "New Name", "", "", "", "0", "0", "0"],
         password_values=["password"],
     )
     assert cli.run() == 0
@@ -381,8 +412,8 @@ def test_visualization_action_shows_all_queries_and_output_path() -> None:
 
     assert cli.run() == 0
     rendered = output.getvalue()
-    assert cli.query_log.action == "UC-12"
-    assert "UC-12 · Network Visualization" in rendered
+    assert cli.query_log.action == "VIZ"
+    assert "Network Visualization" in rendered
     assert "GET_EGO_NETWORK" in rendered
     assert "GET_EDGES_AMONG" in rendered
     assert "output/network_alice.a.html" in rendered
@@ -426,3 +457,71 @@ def test_visualization_browser_failure_is_friendly_and_shows_all_queries() -> No
     assert "Traceback" not in rendered
     assert "password_hash" not in rendered
     assert "cypher123" not in rendered
+
+
+def test_main_menu_lists_all_thirteen_use_case_actions() -> None:
+    cli, _graph, _output = _cli(input_values=[], password_values=["password"])
+    prompts: list[str] = []
+    answers = iter(["1", "alice.a", "0", "0"])
+
+    def record(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    cli.input_func = record
+    assert cli.run() == 0
+    menu = "\n".join(prompts)
+    for label in ("[8] View all users", "[9] Search users", "[10] Popular users", "[11] Degrees of separation"):
+        assert label in menu
+
+
+def test_all_users_lists_everyone_and_toggles_follow_state() -> None:
+    cli, graph, output = _cli(
+        input_values=["1", "alice.a", "8", "2", "3", "b", "0", "0"],
+        password_values=["password"],
+    )
+    assert cli.run() == 0
+    rendered = output.getvalue()
+    assert "UC-10 · All Users" in rendered
+    assert "@alice.a" in rendered and "You" in rendered and "Following" in rendered
+    assert graph.unfollow_calls == ["bob.b"]
+    assert graph.follow_calls == ["carol.c"]
+
+
+def test_all_users_shows_error_when_following_yourself() -> None:
+    cli, graph, output = _cli(
+        input_values=["1", "alice.a", "8", "1", "b", "0", "0"],
+        password_values=["password"],
+    )
+
+    def reject(_session, _target):
+        raise SelfActionError("you cannot follow yourself")
+
+    graph.follow = reject
+    assert cli.run() == 0
+    assert "you cannot follow yourself" in output.getvalue()
+
+
+def test_degrees_of_separation_prints_path_and_count() -> None:
+    cli, _graph, output = _cli(
+        input_values=["1", "alice.a", "11", "alice.a", "bob.b", "11", "alice.a", "nobody.n", "0", "0"],
+        password_values=["password"],
+    )
+    assert cli.run() == 0
+    rendered = output.getvalue()
+    assert "UC-13 · Degrees of Separation" in rendered
+    assert "@alice.a → @mid.one → @bob.b" in rendered
+    assert "Degrees of separation from @alice.a to @bob.b: 2" in rendered
+    assert "No connection found from @alice.a to @nobody.n within 4 hops." in rendered
+
+
+def test_mutual_connections_accepts_two_usernames() -> None:
+    cli, graph, output = _cli(
+        input_values=["1", "alice.a", "6", "dave.d", "bob.b", "b", "6", "", "bob.b", "b", "0", "0"],
+        password_values=["password"],
+    )
+    assert cli.run() == 0
+    rendered = output.getvalue()
+    assert graph.mutual_calls == [("dave.d", "bob.b"), (None, "bob.b")]
+    assert "@dave.d and @bob.b both follow 1 person" in rendered
+    assert "@bob.b follows @dave.d." in rendered

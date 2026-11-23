@@ -56,7 +56,7 @@ def test_cli_visualization_flow_generates_uc12_output() -> None:
         assert result.returncode == 0, (
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-        assert "UC-12 · Network Visualization" in result.stdout
+        assert "Network Visualization" in result.stdout
         assert str(output_path.relative_to(ROOT)) in result.stdout
         assert "Traceback" not in result.stdout
         assert output_path.exists()
