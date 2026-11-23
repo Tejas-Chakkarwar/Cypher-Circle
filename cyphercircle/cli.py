@@ -40,7 +40,9 @@ from .models import (
     MutualConnections,
     Profile,
     Recommendation,
+    SeparationResult,
     Session,
+    UserDirectory,
 )
 from .profile_service import ProfileService
 from .search_service import SearchService
@@ -148,8 +150,9 @@ class CLI:
                 self._header()
                 choice = self._ask(
                     "[1] View profile  [2] Edit profile  [3] Follow  [4] Unfollow\n"
-                    "[5] Connections  [6] Mutual connections  [7] Recommendations\n"
-                    "[8] Search users  [9] Popular users  [V] Network visualization\n"
+                    "[5] Following & followers  [6] Mutual connections  [7] Recommendations\n"
+                    "[8] View all users  [9] Search users  [10] Popular users\n"
+                    "[11] Degrees of separation  [V] Network visualization\n"
                     "[C] Toggle Show Cypher  [0] Logout  [X] Exit\n"
                     "Choose"
                 ).strip().lower()
@@ -164,8 +167,10 @@ class CLI:
                 "5": ("UC-7", self._connections),
                 "6": ("UC-8", self._mutual_connections),
                 "7": ("UC-9", self._recommendations),
-                "8": ("UC-10", self._search_users),
-                "9": ("UC-11", self._popular_users),
+                "8": ("UC-10", self._all_users),
+                "9": ("UC-11", self._search_users),
+                "10": ("UC-12", self._popular_users),
+                "11": ("UC-13", self._degrees_of_separation),
             }
             if choice == "2":
                 self._edit_profile()
@@ -173,7 +178,7 @@ class CLI:
                 label, action = actions[choice]
                 self._execute(label, action)
             elif choice == "v":
-                self._execute("UC-12", self._visualization)
+                self._execute("VIZ", self._visualization)
             elif choice == "c":
                 self.show_cypher = not self.show_cypher
                 state = "ON" if self.show_cypher else "OFF"
@@ -262,13 +267,18 @@ class CLI:
             self.console.print("\n[yellow]Returning to the main menu.[/yellow]")
 
     def _edit_details(self, session: Session) -> None:
-        self.console.print("[dim]Press Enter to keep a value. Type - to clear bio or location.[/dim]")
+        self.console.print(
+            "[dim]Press Enter to keep a value. Type - to clear bio or location. "
+            "Your username cannot be changed.[/dim]"
+        )
         name_input = self._ask("Name").strip()
+        email_input = self._ask("Email").strip()
         bio_input = self._ask("Bio").strip()
         location_input = self._ask("Location").strip()
         profile = self.profile.update_profile(
             session,
             name=name_input or None,
+            email=email_input or None,
             bio=bio_input if bio_input else None,
             location=location_input if location_input else None,
         )
@@ -321,7 +331,7 @@ class CLI:
         self.console.print(
             Panel(
                 "Following and followers are shown separately.",
-                title="UC-7 · Connections",
+                title="UC-7 · Following and Followers",
                 border_style="cyan",
             )
         )
@@ -351,12 +361,20 @@ class CLI:
 
     def _mutual_connections(self) -> None:
         session = self._require_session()
-        other = self._ask("Username to compare").strip()
+        self.console.print(
+            Panel(
+                "Shows users followed by both people.",
+                title="UC-8 · Mutual Connections",
+                border_style="cyan",
+            )
+        )
+        first = self._ask(f"First username (Enter for @{escape_markup(session.username)})").strip()
+        other = self._ask("Second username").strip()
         page = 0
         page_size = 15
         while True:
             result = self.graph.mutual_connections(
-                session, other, skip=page * page_size, limit=page_size
+                session, other, first=first or None, skip=page * page_size, limit=page_size
             )
             self._print_mutual(result, other, page, page_size)
             command = self._ask("n next · p previous · b back").strip().lower()
@@ -379,13 +397,15 @@ class CLI:
         session = self._require_session()
         recommendations = self.graph.recommendations(session, limit=10)
         if not recommendations:
-            self.console.print("[yellow]No recommendations right now.[/yellow]")
+            self.console.print(
+                "[yellow]No two-hop recommendations yet. Follow some people first.[/yellow]"
+            )
             return
-        table = Table(title="UC-9 · Friend Recommendations")
+        table = Table(title="UC-9 · Friend Recommendations (two-hop follow paths)")
         table.add_column("#", justify="right")
         table.add_column("User")
-        table.add_column("Why")
-        table.add_column("Score", justify="right")
+        table.add_column("Reached through")
+        table.add_column("Paths", justify="right")
         for index, recommendation in enumerate(recommendations, 1):
             table.add_row(
                 str(index),
@@ -408,6 +428,64 @@ class CLI:
         self._run_mutation("UC-5", lambda: self.graph.follow(session, target))
         self.console.print(f"[green]You are now following @{escape_markup(target)}.[/green]")
 
+    def _all_users(self) -> None:
+        session = self._require_session()
+        page = 0
+        page_size = 20
+        while True:
+            directory = self.search.all_users(session, skip=page * page_size, limit=page_size)
+            self._print_directory(directory, page, page_size)
+            command = self._ask(
+                "Enter # to follow/unfollow · n next · p previous · b back"
+            ).strip().lower()
+            if command == "b":
+                return
+            if command == "n":
+                if (page + 1) * page_size >= directory.total:
+                    self.console.print("[yellow]You are on the last page.[/yellow]")
+                else:
+                    page += 1
+                continue
+            if command == "p":
+                if page == 0:
+                    self.console.print("[yellow]You are on the first page.[/yellow]")
+                else:
+                    page -= 1
+                continue
+            index = self._selection_index(command, len(directory.users))
+            if index is None:
+                self.console.print("[yellow]Use a row number, n, p, or b.[/yellow]")
+                continue
+            entry = directory.users[index - 1]
+            try:
+                if entry.i_follow:
+                    self._run_mutation("UC-6", lambda: self.graph.unfollow(session, entry.username))
+                    self.console.print(
+                        f"[green]You unfollowed @{escape_markup(entry.username)}.[/green]"
+                    )
+                else:
+                    self._run_mutation("UC-5", lambda: self.graph.follow(session, entry.username))
+                    self.console.print(
+                        f"[green]You are now following @{escape_markup(entry.username)}.[/green]"
+                    )
+            except CypherCircleError as exc:
+                self._print_error(exc)
+
+    def _degrees_of_separation(self) -> None:
+        session = self._require_session()
+        self.console.print(
+            Panel(
+                "Shortest directed follow path from the first user to the second "
+                "(at most 4 hops). Use View all users to look up usernames.",
+                title="UC-13 · Degrees of Separation",
+                border_style="cyan",
+            )
+        )
+        source = self._ask("From username").strip()
+        target = self._ask("To username").strip()
+        result = self.graph.degrees_of_separation(session, source, target)
+        self._print_separation(result)
+
     def _search_users(self) -> None:
         session = self._require_session()
         query = self._ask("Search (at least 2 characters)")
@@ -415,7 +493,7 @@ class CLI:
         if not results:
             self.console.print("[yellow]No users found.[/yellow]")
             return
-        table = Table(title="UC-10 · Search Users")
+        table = Table(title="UC-11 · Search Users")
         table.add_column("#", justify="right")
         table.add_column("User")
         table.add_column("Followers", justify="right")
@@ -453,7 +531,7 @@ class CLI:
         if not users:
             self.console.print("[yellow]No popular users found.[/yellow]")
             return
-        table = Table(title="UC-11 · Popular Users")
+        table = Table(title="UC-12 · Popular Users")
         table.add_column("#", justify="right")
         table.add_column("User")
         table.add_column("Followers", justify="right")
@@ -488,7 +566,7 @@ class CLI:
             self.console.print(
                 Panel(
                     "No network yet. Follow someone first.",
-                    title="UC-12 · Network Visualization",
+                    title="Network Visualization",
                     border_style="yellow",
                 )
             )
@@ -496,7 +574,7 @@ class CLI:
         self.console.print(
             Panel(
                 f"Saved to {escape_markup(path)}\nThe visualization was opened in your browser.",
-                title="UC-12 · Network Visualization",
+                title="Network Visualization",
                 border_style="green",
             )
         )
@@ -540,13 +618,59 @@ class CLI:
             )
         self.console.print(table)
 
+    def _print_directory(self, directory: UserDirectory, page: int, page_size: int) -> None:
+        start = page * page_size + 1 if directory.users else 0
+        end = page * page_size + len(directory.users)
+        table = Table(
+            title=f"UC-10 · All Users (showing {start}–{end} of {directory.total})"
+        )
+        table.add_column("#", justify="right")
+        table.add_column("Username")
+        table.add_column("Name")
+        table.add_column("Followers", justify="right")
+        table.add_column("Status")
+        for index, entry in enumerate(directory.users, 1):
+            status = "You" if entry.is_me else ("Following" if entry.i_follow else "")
+            table.add_row(
+                str(index),
+                f"@{escape_markup(entry.username)}",
+                escape_markup(entry.name),
+                str(entry.followers),
+                status,
+            )
+        self.console.print(table)
+
+    def _print_separation(self, result: SeparationResult) -> None:
+        source = escape_markup(result.source)
+        target = escape_markup(result.target)
+        if not result.found:
+            self.console.print(
+                Panel(
+                    f"No connection found from @{source} to @{target} "
+                    f"within {result.max_hops} hops.",
+                    title="UC-13 · Degrees of Separation",
+                    border_style="yellow",
+                )
+            )
+            return
+        path = " → ".join(f"@{escape_markup(step.username)}" for step in result.path)
+        self.console.print(
+            Panel(
+                f"{path}\n\nDegrees of separation from @{source} to @{target}: "
+                f"[bold]{result.degrees}[/bold]",
+                title="UC-13 · Degrees of Separation",
+                border_style="green",
+            )
+        )
+
     def _print_mutual(
         self, result: MutualConnections, other: str, page: int, page_size: int
     ) -> None:
         start = page * page_size + 1 if result.users else 0
         end = page * page_size + len(result.users)
-        safe_other = escape_markup(other.lower())
-        table = Table(title=f"UC-8 · Mutual Connections with @{safe_other}")
+        safe_first = escape_markup(result.first or (self.session.username if self.session else ""))
+        safe_other = escape_markup(result.second or other.lower())
+        table = Table(title=f"UC-8 · Mutual Connections of @{safe_first} and @{safe_other}")
         table.add_column("User")
         table.add_column("Location")
         for user in result.users:
@@ -556,7 +680,8 @@ class CLI:
             )
         self.console.print(
             Panel(
-                f"You and @{safe_other} both follow {result.total} people "
+                f"@{safe_first} and @{safe_other} both follow {result.total} "
+                f"{'person' if result.total == 1 else 'people'} "
                 f"(showing {start}–{end}).\n{self._relationship_text(result)}",
                 border_style="green",
             )
@@ -753,23 +878,22 @@ class CLI:
             return None
         return value if 1 <= value <= count else None
 
-    def _recommendation_reason(self, recommendation: Recommendation) -> str:
-        if recommendation.reason == "network":
-            via = ", ".join(f"@{escape_markup(username)}" for username in recommendation.via)
-            return f"Network: followed by {via}" if via else "Network"
-        if recommendation.reason == "circle":
-            return f"Circle: {escape_markup(recommendation.circle or 'shared circle')}"
-        return "Popular on Cypher Circle"
+    @staticmethod
+    def _recommendation_reason(recommendation: Recommendation) -> str:
+        via = ", ".join(f"@{escape_markup(username)}" for username in recommendation.via)
+        return f"Followed by {via}, whom you follow" if via else "Two-hop follow path"
 
     @staticmethod
     def _relationship_text(result: MutualConnections) -> str:
+        first = f"@{escape_markup(result.first)}" if result.first else "You"
+        second = f"@{escape_markup(result.second)}" if result.second else "them"
         if result.status.i_follow and result.status.they_follow:
-            return "You follow each other."
+            return f"{first} and {second} follow each other."
         if result.status.i_follow:
-            return "You follow them."
+            return f"{first} follows {second}."
         if result.status.they_follow:
-            return "They follow you."
-        return "No direct connection."
+            return f"{second} follows {first}."
+        return "Neither follows the other directly."
 
     def _require_session(self) -> Session:
         if self.session is None:
