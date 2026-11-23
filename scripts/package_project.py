@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "docs" / "report"
-ARCHIVE = ROOT / "projects.zip"
+ARCHIVE = ROOT / "project.zip"
 PDF = REPORT_DIR / "report.pdf"
 TOP_LEVEL = (
     "README.md", "docs/PROJECT_DESIGN.pdf", "requirements.txt", "pyproject.toml",
@@ -35,21 +35,21 @@ def resource_files(directory: str) -> list[Path]:
 
 
 def sources() -> list[tuple[Path, str]]:
-    entries: list[tuple[Path, str]] = [(ROOT / name, f"source/{name}") for name in TOP_LEVEL]
-    entries += [(path, f"source/{path.relative_to(ROOT)}") for path in python_files("cyphercircle")]
-    entries += [(path, f"source/{path.relative_to(ROOT)}") for path in resource_files("cyphercircle/web_templates")]
-    entries += [(path, f"source/{path.relative_to(ROOT)}") for path in resource_files("cyphercircle/web_static")]
-    entries += [(path, f"source/{path.relative_to(ROOT)}") for path in python_files("scripts")]
-    entries += [(path, f"source/{path.relative_to(ROOT)}") for path in python_files("tests")]
-    entries += [(path, f"source/docs/report/diagrams/{path.name}") for path in sorted((REPORT_DIR / "diagrams").glob("*.png"))]
+    entries: list[tuple[Path, str]] = [(ROOT / name, f"source_code/{name}") for name in TOP_LEVEL]
+    entries += [(path, f"source_code/{path.relative_to(ROOT)}") for path in python_files("cyphercircle")]
+    entries += [(path, f"source_code/{path.relative_to(ROOT)}") for path in resource_files("cyphercircle/web_templates")]
+    entries += [(path, f"source_code/{path.relative_to(ROOT)}") for path in resource_files("cyphercircle/web_static")]
+    entries += [(path, f"source_code/{path.relative_to(ROOT)}") for path in python_files("scripts")]
+    entries += [(path, f"source_code/{path.relative_to(ROOT)}") for path in python_files("tests")]
+    entries += [(path, f"source_code/docs/report/diagrams/{path.name}") for path in sorted((REPORT_DIR / "diagrams").glob("*.png"))]
     entries += [
-        (path, f"source/docs/report/screenshots/{path.name}")
+        (path, f"source_code/docs/report/screenshots/{path.name}")
         for path in sorted((REPORT_DIR / "screenshots").glob("*"))
         if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg"}
     ]
     entries += [
-        (REPORT_DIR / "report.md", "source/docs/report/report.md"),
-        (REPORT_DIR / "report.template.md", "source/docs/report/report.template.md"),
+        (REPORT_DIR / "report.md", "source_code/docs/report/report.md"),
+        (REPORT_DIR / "report.template.md", "source_code/docs/report/report.template.md"),
     ]
     missing = [str(path.relative_to(ROOT)) for path, _ in entries if not path.is_file()]
     if missing:
@@ -59,7 +59,7 @@ def sources() -> list[tuple[Path, str]]:
 
 def validate_names(names: list[str]) -> None:
     for name in names:
-        normalized = name.removeprefix("source/")
+        normalized = name.removeprefix("source_code/")
         if normalized == "report.pdf":
             continue
         if any(normalized == part or normalized.startswith(part + "/") for part in FORBIDDEN):
@@ -115,9 +115,9 @@ def build_archive() -> int:
         names = archive.namelist()
         validate_names(names)
         required = {
-            "report.pdf", "source/README.md", "source/docs/PROJECT_DESIGN.pdf",
-            "source/cyphercircle/cli.py", "source/scripts/preprocess.py",
-            "source/tests/test_cli.py",
+            "report.pdf", "source_code/README.md", "source_code/docs/PROJECT_DESIGN.pdf",
+            "source_code/cyphercircle/cli.py", "source_code/scripts/preprocess.py",
+            "source_code/tests/test_cli.py",
         }
         missing = sorted(required - set(names))
         if missing:
