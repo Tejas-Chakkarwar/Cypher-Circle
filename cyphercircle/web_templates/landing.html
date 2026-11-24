@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Cypher Circle · Explore your graph{% endblock %}
+{% block content %}
+<section class="hero-grid">
+  <div class="hero-copy">
+    <p class="eyebrow">A social graph, made visible</p>
+    <h1>Find the people who make your network <em>click.</em></h1>
+    <p class="lede">Cypher Circle turns a directed Neo4j network into a calm, useful place to discover connections, circles, and new paths through your graph.</p>
+    <div class="hero-actions">
+      <a class="button" href="{{ url_for('register') }}">Create your account <span aria-hidden="true">→</span></a>
+      <a class="text-link" href="{{ url_for('login') }}">Already a member? Log in</a>
+    </div>
+    <div class="trust-row"><span class="status-dot"></span> Local-first · Offline-ready visualization · No tracking</div>
+  </div>
+  <div class="hero-art" aria-label="Abstract network illustration">
+    <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="orb orb-c"></div>
+    <svg viewBox="0 0 520 360" role="img" aria-label="Connected network nodes">
+      <path class="network-line" d="M105 240 L205 104 L350 135 L425 266 L260 294 Z M205 104 L425 266 M105 240 L350 135" />
+      <circle class="network-node node-center" cx="260" cy="294" r="25" /><circle class="network-node" cx="105" cy="240" r="16" />
+      <circle class="network-node" cx="205" cy="104" r="19" /><circle class="network-node" cx="350" cy="135" r="14" /><circle class="network-node" cx="425" cy="266" r="18" />
+    </svg>
+    <div class="hero-art-label">Your graph, at a glance</div>
+  </div>
+</section>
+<section class="section-heading"><div><p class="eyebrow">The living graph</p><h2>Small signals. Better paths.</h2></div><p>Explore real relationships, synthetic profile details, and the circles that bring them together.</p></section>
+<section class="stat-grid">
+  {% if stats %}
+    <div class="stat-card"><span>Users</span><strong>{{ stats.users }}</strong><small>people in the graph</small></div>
+    <div class="stat-card"><span>Follows</span><strong>{{ stats.follows }}</strong><small>directed relationships</small></div>
+    <div class="stat-card"><span>Circles</span><strong>{{ stats.circles }}</strong><small>shared interests</small></div>
+  {% else %}
+    <div class="empty-card wide"><span class="eyebrow">Graph stats</span><h3>Ready when Neo4j is running</h3><p>{{ "Start Neo4j with `make up`, then load the graph with `make data` and `make load`." if stats_unavailable else "The graph statistics will appear here." }}</p></div>
+  {% endif %}
+</section>
+<section class="feature-grid">
+  <article class="feature-card"><span class="feature-icon">↗</span><h3>Follow the signal</h3><p>See following, followers, mutual connections, and recommendations without losing the thread.</p></article>
+  <article class="feature-card"><span class="feature-icon">◎</span><h3>Find your circles</h3><p>Join communities, refine your profile, and make the graph feel more like yours.</p></article>
+  <article class="feature-card"><span class="feature-icon">⌁</span><h3>See the shape</h3><p>Open an interactive, self-contained network view that settles into a readable map.</p></article>
+</section>
+{% endblock %}

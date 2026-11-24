@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cypher Circle social graph dashboard">
+  <title>{% block title %}Cypher Circle{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header">
+    <div class="shell nav-shell">
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">CC</span> Cypher Circle</a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        {% if current_user %}
+          <a class="{{ 'is-active' if request.endpoint == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}"{% if request.endpoint == 'dashboard' %} aria-current="page"{% endif %}>Dashboard</a>
+          <a class="{{ 'is-active' if request.endpoint == 'all_users' else '' }}" href="{{ url_for('all_users') }}"{% if request.endpoint == 'all_users' %} aria-current="page"{% endif %}>People</a>
+          <a class="{{ 'is-active' if request.endpoint == 'search_users' else '' }}" href="{{ url_for('search_users') }}"{% if request.endpoint == 'search_users' %} aria-current="page"{% endif %}>Search</a>
+          <a class="{{ 'is-active' if request.endpoint == 'popular' else '' }}" href="{{ url_for('popular') }}"{% if request.endpoint == 'popular' %} aria-current="page"{% endif %}>Explore</a>
+          <a class="{{ 'is-active' if request.endpoint == 'separation' else '' }}" href="{{ url_for('separation') }}"{% if request.endpoint == 'separation' %} aria-current="page"{% endif %}>Separation</a>
+          <a class="{{ 'is-active' if request.endpoint == 'circles' else '' }}" href="{{ url_for('circles') }}"{% if request.endpoint == 'circles' %} aria-current="page"{% endif %}>Circles</a>
+          <a class="{{ 'is-active' if request.endpoint in ('visualization', 'visualization_document') else '' }}" href="{{ url_for('visualization') }}"{% if request.endpoint in ('visualization', 'visualization_document') %} aria-current="page"{% endif %}>Network</a>
+          <form method="post" action="{{ url_for('logout') }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="nav-button" type="submit">Log out</button>
+          </form>
+        {% else %}
+          <a href="{{ url_for('login') }}">Log in</a>
+          <a class="button button-small" href="{{ url_for('register') }}">Join the circle</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+  <main id="main-content" class="shell page-shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer shell">
+    <span>Cypher Circle</span><span>Built on a deterministic Neo4j graph</span>
+  </footer>
+</body>
+</html>

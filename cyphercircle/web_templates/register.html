@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Join · Cypher Circle{% endblock %}
+{% block content %}
+<div class="auth-layout register-layout"><div class="auth-intro"><p class="eyebrow">Join the circle</p><h1>Make your first connection count.</h1><p>Create a profile, choose a few circles, and let the graph reveal useful next steps.</p><div class="quote-card">“The best connections are often one hop away.”</div></div>
+  <section class="form-card" aria-labelledby="register-title"><p class="eyebrow">UC-1 · Create account</p><h2 id="register-title">Start your profile</h2>
+    {% if error %}<div class="form-error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-row"><div><label for="name">Name</label><input id="name" name="name" type="text" value="{{ form.name }}" autocomplete="name" required></div><div><label for="username">Username</label><input id="username" name="username" type="text" value="{{ form.username }}" autocomplete="username" required></div></div>
+      <label for="email">Email</label><input id="email" name="email" type="email" value="{{ form.email }}" autocomplete="email" required>
+      <div class="field-row"><div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" required></div><div><label for="password_confirm">Confirm password</label><input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required></div></div>
+      <label for="bio">Bio <span class="label-hint">optional · 160 characters</span></label><textarea id="bio" name="bio" maxlength="160" rows="3">{{ form.bio }}</textarea>
+      {% if circles %}<fieldset><legend>Choose up to three circles <span class="label-hint">optional</span></legend><div class="choice-grid">{% for circle in circles %}<label class="choice"><input type="checkbox" name="circle_ids" value="{{ circle.circle_id }}"{% if circle.circle_id in request.form.getlist('circle_ids') %} checked{% endif %}><span>{{ circle.name }}<small>{{ circle.members or 0 }} members</small></span></label>{% endfor %}</div></fieldset>{% endif %}
+      <button class="button button-full" type="submit">Create account <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="form-foot">Already have an account? <a href="{{ url_for('login') }}">Log in</a></p>
+  </section>
+</div>
+{% endblock %}
